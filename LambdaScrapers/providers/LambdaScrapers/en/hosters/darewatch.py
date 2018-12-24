@@ -9,7 +9,7 @@
     Updated and refactored by someone.
     Originally created by others.
 '''
-import re
+import re, traceback, urllib, urlparse, json, random, time
 import base64
 import requests
 from time import time
@@ -17,6 +17,8 @@ from time import time
 import xbmc
 
 from providerModules.LambdaScrapers import client
+from providerModules.LambdaScrapers import cfscrape
+from providerModules.LambdaScrapers import log_utils
 
 
 class source:
@@ -25,151 +27,129 @@ class source:
         self.language = ['en']
         self.domains = ['ondarewatch.com', 'dailytvfix.com']
         self.base_link = 'http://www.dailytvfix.com'
-        self.search_link = self.base_link + '/ajax/search.php'
-        self.ua = client.randomagent()
 
-        # Search headers for 'http://www.dailytvfix/ajax/search.php'.
-        self.search_headers = {
-            'Host': self.base_link.replace('http://', '', 1),
-            'User-Agent': self.ua,
-            'Accept': 'application/json, text/javascript, */*; q=0.01',
-            'Accept-Language': 'en-US,en;q=0.5',
-            'Accept-Encoding': 'gzip, deflate',
-            'Referer': self.base_link + '/',
-            'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-            'X-Requested-With': 'XMLHttpRequest',
-            'DNT': '1'
-        }
+        self.scraper = cfscrape.create_scraper()
 
 
     def movie(self, imdb, title, localtitle, aliases, year):
         try:
-            possible_titles = set(
-                (title.lower(),) + tuple((alias['title'].lower() for alias in aliases) if aliases else ())
-            )
-            json_data = self._ajax_post(title.lower())
-            for entry in json_data:
-                if 'movie' in entry['meta'].lower():
-                    if entry['title'].lower() in possible_titles:
-                        url = self.base_link + entry['permalink']
-                        return url
-            return None
-        except Exception as e:
-            self._error(repr(e))
-            return None
+            url = {'imdb': imdb, 'title': title, 'year': year}
+            url = urllib.urlencode(url)
+            return url
+        except:
+            failure = traceback.format_exc()
+            log_utils.log('DAREWATCH - Exception: \n' + str(failure))
+            return
 
 
     def tvshow(self, imdb, tvdb, tvshowtitle, localtvshowtitle, aliases, year):
         try:
-            tvshowtitle = tvshowtitle.lower()
-            possible_titles = set(
-                (tvshowtitle,) + tuple((alias['title'] for alias in aliases) if aliases else ())
-            )
-            best_guesses = [ ]
-            json_data = self._ajax_post(tvshowtitle)
-            for entry in json_data:
-                if 'tv' in entry['meta'].lower():
-                    entry_title_lower = entry['title'].lower()
-                    if entry_title_lower in possible_titles:
-                        best_guesses.append(entry['permalink'])
-                    elif tvshowtitle in entry_title_lower and year in entry_title_lower:
-                        # For special cases like 'The Flash' vs 'The Flash 2014', make the entry
-                        # that matches the most (including year) be prepended.
-                        best_guesses.insert(0, entry['permalink'])
-            if best_guesses:
-                url = self.base_link + best_guesses[0]
-                return url
-        except Exception as e:
-            self._error(repr(e))
-            return None
+            url = {'imdb': imdb, 'tvdb': tvdb, 'tvshowtitle': tvshowtitle, 'year': year}
+            url = urllib.urlencode(url)
+            return url
+        except:
+            failure = traceback.format_exc()
+            log_utils.log('DAREWATCH - Exception: \n' + str(failure))
+            return
 
 
     def episode(self, url, imdb, tvdb, title, premiered, season, episode):
-        return url + '/season/%s/episode/%s' % (season, episode)
+        try:
+            if url == None: return
+
+            url = urlparse.parse_qs(url)
+            url = dict([(i, url[i][0]) if url[i] else (i, '') for i in url])
+            url['title'], url['premiered'], url['season'], url['episode'] = title, premiered, season, episode
+            url = urllib.urlencode(url)
+            return url
+        except:
+            failure = traceback.format_exc()
+            log_utils.log('RLSBB - Exception: \n' + str(failure))
+            return
 
 
     def sources(self, url, hostDict, hostprDict):
-        sources = [ ]
+        log_utils.log("DAREWATCH debug")
+            
+        sources = []
+        query_bases  = []
+        options = []
+        items = []
+        html    = None
 
-        try:
-            # If in the future there's a Cloudflare challenge, use client.request() instead.
-            r = requests.get(url, headers={'User-Agent': self.ua}, timeout=10)
-        except:
-            r = type('FailedResponse', (object,), {'ok': False})
+        if url == None: return sources
+
+        data = urlparse.parse_qs(url)
+        data = dict([(i, data[i][0]) if data[i] else (i, '') for i in data])        
+        title = (data['tvshowtitle'] if 'tvshowtitle' in data else data['title'])
+        query = self.base_link + '/%s/season/%02d/episode/%02d' % (data['tvshowtitle'].replace(" ","-"), int(data['season']), int(data['episode']))
+        log_utils.log("DAREWATCH query : " + str(query))
+
+        html = self.scraper.get(query)
+
+        log_utils.log("DAREWATCH html_code 1 : " + str(html.status_code))
+
+        if html.status_code == 200:
+            posts = client.parseDOM(html.content, "li", attrs={"class": "current"})   # get all <li class=current>...</div>
+            #log_utils.log("DAREWATCH posts : " + str(posts))
+            for post in posts:
+                item = client.parseDOM(post, 'a', ret="href", attrs={"target": "_blank"})
+                if len(item) > 0:
+                    items.append(item[0])
+            
+            log_utils.log("DAREWATCH items : " + str(items))
+
+        else: 
+            log_utils.log("DAREWATCH return code 1 : " + str(html.status_code))
 
         # On some movies there's like 20+ Openload links, most of the time there's no need for so many.
-        openload_limit = 5 # Set this as the maximum amount of Openload links obtained from Darewatch.
+        openload_limit = 10 # Set this as the maximum amount of Openload links obtained from Darewatch.
+        hostDict = hostprDict + hostDict 
 
-        if r.ok:
-            match = re.findall("] = '(.+?)'", r.text, re.DOTALL)
-            for iframe_blob in match:
-                iframe = base64.b64decode(iframe_blob)
-                temp = re.search('src="(.+?)"', iframe, re.DOTALL|re.IGNORECASE)
-                if temp:
-                    host_url = temp.group(1).strip() # strip() because sometimes there's an '\r' at the end.
-                else:
-                    continue
+        for item in items :
+            log_utils.log("DAREWATCH item : " + str(item))
+            html = self.scraper.get(item)
 
-                if 'openload' in host_url:
-                    # Avoids some duplicate Openload links, both of these come up:
-                    # https://openload.co/embed/dVdG-TGRkZc/Ready.Player.One.2018.(...)
-                    # https://openload.co/embed/dVdG-TGRkZc
-                    is_duplicate = next(
+            if html.status_code != 200:
+                log_utils.log("DAREWATCH return code 2 : " + str(html.status_code))
+                continue 
+            else:
+                link = client.parseDOM(html.content, "iframe", ret="src")[0]
+                log_utils.log("DAREWATCH link : " + str(link))
+
+            if 'openload' in link:
+                # Avoids some duplicate Openload links, both of these come up:
+                # https://openload.co/embed/dVdG-TGRkZc/Ready.Player.One.2018.(...)
+                # https://openload.co/embed/dVdG-TGRkZc
+                is_duplicate = next(
                         (
                             True
                             for source in sources
-                            if (len(host_url) < len(source['url']) and host_url in source['url'])
-                            or (len(source['url']) < len(host_url) and source['url'] in host_url)
+                            if (len(link) < len(source['url']) and link in source['url'])
+                            or (len(source['url']) < len(link) and source['url'] in link)
                         ),
                         False
-                    )
-                    if is_duplicate or openload_limit < 1:
-                        continue # Skip this source.
-                    else:
-                        quality = 'HD'
-                        openload_limit -= 1 # Count towards the Openload links limit.
+                )
+                if is_duplicate or openload_limit < 1:
+                    continue # Skip this source.
                 else:
-                    quality = 'SD'
+                    quality = 'HD'
+                    openload_limit -= 1 # Count towards the Openload links limit.
+            else:
+                quality = 'SD'
 
-                hoster = host_url.split('//', 1)[1].replace('www.', '', 1)
-                hoster = hoster[ : hoster.find('/')]
-                sources.append(
+            hoster = link.split('//', 1)[1].replace('www.', '', 1)
+            hoster = hoster[ : hoster.find('/')]
+            sources.append(
                     {
                         'source': hoster,
                         'quality': quality,
                         'language': 'en',
-                        'url': host_url,
+                        'url': link,
                         'direct': False,
                         'debridonly': False
                     }
-                )
+            )
         return sources
 
 
-    def resolve(self, url):
-        if "google" in url:
-            return directstream.googlepass(url)
-        else:
-            return url
-
-
-    def _ajax_post(self, query):
-        try:
-            data = {'limit': 15, 'q': query, 'timestamp': int(time() * 1000)}
-            r = requests.post(self.search_link, data=data, headers=self.search_headers, timeout=8)
-        except:
-            r = type('FailedResponse', (object,), {'ok': False})
-
-        if r.ok and r.text != 'Restricted access':
-            json_data = r.json()
-            return json_data if (len(json_data) > 1 or json_data[0]['meta'].lower() != 'more') else ()
-        else:
-            return ()
-
-
-    def _error(self, e):
-        xbmc.log('DAREWATCH Error > ' + repr(e), xbmc.LOGERROR)
-
-
-    def _debug(self, name, val):
-        xbmc.log('DAREWATCH Debug > %s %s' % (name, repr(val)), xbmc.LOGWARNING)
