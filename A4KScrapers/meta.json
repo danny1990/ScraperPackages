@@ -2,6 +2,6 @@
   "author": "Unknown",
   "version":"0.0.7",
   "name":"a4kScrapers",
-  "update_directory": "https://github.com/reddit-reaper/ScraperPackages/A4KScrapers/raw/master",
+  "update_directory": "https://github.com/reddit-reaper/ScraperPackages/A4KScrapers/raw/master/",
   "remote_meta": "https://raw.githubusercontent.com/reddit-reaper/ScraperPackages/master/A4KScrapers/meta.json"
 }
