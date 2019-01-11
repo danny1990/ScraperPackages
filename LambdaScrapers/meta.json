@@ -1,6 +1,6 @@
 {
   "author": "Unknown",
-  "version":"1.8.2.2",
+  "version":"1.8.2.8",
   "name":"LambdaScrapers",
   "update_directory": "https://raw.githubusercontent.com/reddit-reaper/ScraperPackages/master/LambdaScrapers/",
   "remote_meta": "https://raw.githubusercontent.com/reddit-reaper/ScraperPackages/master/LambdaScrapers/meta.json"

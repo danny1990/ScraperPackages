@@ -1,7 +1,5 @@
 '''
-    Created by others
-    Refactored for lambdascrapers
-    Nov 20 2018
+    Torrentapi
 '''
 
 import re, requests, xbmc
